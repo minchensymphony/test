@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Test') {
             steps {
-                sh 'groovy jenkins.groovy'
+                sh "groovy jenkins.groovy --build-url ${BUILD_URL}"
                 cleanWs()
             }
         }

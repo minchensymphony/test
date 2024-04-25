@@ -1,3 +1,4 @@
+import groovy.cli.commons.CliBuilder
 import groovy.io.FileType
 import groovy.json.JsonOutput
 import groovy.xml.XmlSlurper
@@ -39,7 +40,7 @@ def readResults(String dir) {
     return failures
 }
 
-def postSuccess() {
+def postSuccess(String buildUrl) {
     postStatus("""\
             <messageML>
                 <div>
@@ -47,7 +48,7 @@ def postSuccess() {
                     <card class='barStyle' accent='tempo-bg-color--green' iconSrc='https://www.jenkins.io/images/logos/actor/actor.png'>
                         <header>
                             <div>
-                                <a class='tempo-text-color--link' href='${BUILD_URL}'>All Tests Passed</a>
+                                <a class='tempo-text-color--link' href='${buildUrl}'>All Tests Passed</a>
                                 <span class='tempo-text-color--normal'> - </span>
                                 <span class='tempo-text-color--normal'>Process Time (UTC) : ${new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))}</span>
                             </div>
@@ -58,7 +59,7 @@ def postSuccess() {
         """)
 }
 
-def postFailed(Map<String, String> failures) {
+def postFailed(String buildUrl, Map<String, String> failures) {
     postStatus("""\
             <messageML>
                 <div>
@@ -66,7 +67,7 @@ def postFailed(Map<String, String> failures) {
                     <card class='barStyle' accent='tempo-bg-color--red' iconSrc='https://www.jenkins.io/images/logos/fire/fire.png'>
                         <header>
                             <div>
-                                <a class='tempo-text-color--link' href='${BUILD_URL}'>Test Failed</a>
+                                <a class='tempo-text-color--link' href='${buildUrl}'>Test Failed</a>
                                 <span class='tempo-text-color--normal'> - </span>
                                 <span class='tempo-text-color--normal'>Process Time (UTC) : ${new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))}</span>
                             </div>
@@ -113,6 +114,15 @@ def postStatus(String message) {
     }
 }
 
+CliBuilder cli = new CliBuilder(usage: 'jenkins.groovy -l').tap {
+    l longOpt: 'build-url', type: String, required: true, "Set Jenkins build URL"
+}
+def options = cli.parse(args)
+
+if (!options) {
+    System.exit(-1)
+}
+
 createFiles()
 
 Map<String, String> failures = readResults('.')
@@ -120,9 +130,9 @@ Map<String, String> failures = readResults('.')
 if (!failures.isEmpty()) {
     failures.forEach { k, v -> println "Test failed in ${k}: ${v}" }
     println "There are ${failures.size() + (failures.size() == 1 ? " test" : " tests")} failed."
-    postFailed(failures)
+    postFailed(options.'build-url', failures)
     System.exit(-1)
 } else {
     println "All tests passed."
-    postSuccess()
+    postSuccess(options.'build-url')
 }
