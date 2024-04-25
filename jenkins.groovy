@@ -1,5 +1,8 @@
 import groovy.io.FileType
+import groovy.json.JsonOutput
 import groovy.xml.XmlSlurper
+
+import java.util.stream.Collectors
 
 def createFiles() {
     for (int i = 0; i < 5; i++) {
@@ -17,7 +20,7 @@ def createFiles() {
 }
 
 def readResults(String dir) {
-    def failureCount = 0
+    def failures = new HashMap()
 
     new File(dir).traverse(type: FileType.FILES, nameFilter: ~/.*test-results.xml$/) {
         def xml = new XmlSlurper().parseText(it.getText("UTF-8"))
@@ -26,22 +29,100 @@ def readResults(String dir) {
             for (testcase in testsuite.testcase) {
                 if (testsuite.@failures.text().toInteger() > 0) {
                     for (failure in testcase.failure) {
-                        failureCount++
-                        println "Test failed: ${it.name}, message: ${failure.@message}"
+                        failures.put(it.name, failure.@message.text())
                     }
                 }
             }
         }
     }
 
-    return failureCount
+    return failures
+}
+
+def postSuccess() {
+    postStatus("""\
+            <messageML>
+                <div>
+                    <h2>C9Trader Login Load Test</h2>
+                    <card class='barStyle' accent='tempo-bg-color--green' iconSrc='https://www.jenkins.io/images/logos/actor/actor.png'>
+                        <header>
+                            <div>
+                                <a class='tempo-text-color--link' href='${BUILD_URL}'>All Tests Passed</a>
+                                <span class='tempo-text-color--normal'> - </span>
+                                <span class='tempo-text-color--normal'>Process Time (UTC) : ${new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))}</span>
+                            </div>
+                        </header>
+                    </card>
+                </div>
+            </messageML>
+        """)
+}
+
+def postFailed(Map<String, String> failures) {
+    postStatus("""\
+            <messageML>
+                <div>
+                    <h2>C9Trader Login Load Test</h2>
+                    <card class='barStyle' accent='tempo-bg-color--red' iconSrc='https://www.jenkins.io/images/logos/fire/fire.png'>
+                        <header>
+                            <div>
+                                <a class='tempo-text-color--link' href='${BUILD_URL}'>Test Failed</a>
+                                <span class='tempo-text-color--normal'> - </span>
+                                <span class='tempo-text-color--normal'>Process Time (UTC) : ${new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))}</span>
+                            </div>
+                        </header>
+                        <body>
+                            <div>
+                                ${failures.entrySet().stream().map { return """\
+                                <div>
+                                    <span class='tempo-text-color--secondary'>${it.getKey()}: </span>
+                                    <span class='tempo-text-color--normal'>${it.getValue()}</span>
+                                </div>""" }.collect(Collectors.joining(''))}
+                            </div>
+                        </body>
+                    </card>
+                </div>
+            </messageML>
+        """)
+}
+
+def postStatus(String message) {
+    try {
+        String postUrl = "https://corporate.symphony.com/universal-webhook/552f195a-9a60-489b-87f6-8bf19745c6bc/6e94c37a-26fd-4fd3-8372-56e50477dfd4/6e76b7c3-0a0f-4765-90c4-9e2043f2baef/53384a28-e4d8-4671-948c-363d118d4494"
+        String body = JsonOutput.toJson(["message": message
+                .stripIndent()
+                .replace("\t", "    ")
+                .replace("    ", "")
+                .replace("\n", "")])
+
+        println("${postUrl}: ${body}")
+
+        def connection = new URL(postUrl).openConnection()
+
+        connection.setRequestMethod('POST')
+        connection.setRequestProperty('x-tag', "c9trader-login-loadtest")
+        connection.setRequestProperty('Content-Type', 'application/json')
+        connection.setDoOutput(true)
+        connection.getOutputStream().write(body.getBytes('UTF-8'))
+
+        println("Updating Status. ResponseCode: ${connection.responseCode}")
+
+        connection.disconnect()
+    } catch (error) {
+        println(error)
+    }
 }
 
 createFiles()
 
-def failureCount = readResults('.')
+Map<String, String> failures = readResults('.')
 
-if (failureCount > 0) {
-    print "There are ${failureCount + (failureCount == 1 ? " test" : " tests")} failed."
+if (!failures.isEmpty()) {
+    failures.forEach { k, v -> println "Test failed in ${k}: ${v}" }
+    println "There are ${failures.size() + (failures.size() == 1 ? " test" : " tests")} failed."
+    postFailed(failures)
     System.exit(-1)
+} else {
+    println "All tests passed."
+    postSuccess()
 }
