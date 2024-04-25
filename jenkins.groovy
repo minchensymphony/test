@@ -16,20 +16,32 @@ def createFiles() {
     }
 }
 
-def readResults() {
-    def dir = new File(".")
-    dir.traverse(type: FileType.FILES, nameFilter: ~/.*test-results.xml$/) {
+def readResults(String dir) {
+    def failureCount = 0
+
+    new File(dir).traverse(type: FileType.FILES, nameFilter: ~/.*test-results.xml$/) {
         def xml = new XmlSlurper().parseText(it.getText("UTF-8"))
 
         for (testsuite in xml.testsuite) {
             for (testcase in testsuite.testcase) {
                 if (testsuite.@failures.text().toInteger() > 0) {
-                    println "${it.name}: failures ${testsuite.@failures}, message ${testcase.failure.@message}"
+                    for (failure in testcase.failure) {
+                        failureCount++
+                        println "Test failed: ${it.name}, message: ${failure.@message}"
+                    }
                 }
             }
         }
     }
+
+    return failureCount
 }
 
 createFiles()
-readResults()
+
+def failureCount = readResults('.')
+
+if (failureCount > 0) {
+    print "There are ${failureCount + (failureCount == 1 ? " test" : " tests")} failed."
+    System.exit(-1)
+}
